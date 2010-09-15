@@ -2,9 +2,14 @@
 import os, sys
 from xml.etree import ElementTree
 import shutil
+from json import dumps, loads
 
 from base64 import b64decode, b64encode
-b64 = (b64decode, b64encode, 'dat')
+import string
+
+ENCODERS = {
+    'b64': (b64decode, b64encode, 'dat')
+}
 
 EXTRACT = [
     # xpath, is_text, decoding: {(dec, enc, extension) | None}
@@ -12,8 +17,8 @@ EXTRACT = [
     ('./Sequence/Node/Properties/MZ.Prefs.Export.LastExportedPreset', True, None),
     ('./WorkspaceSettings/WorkspaceDefinition', True, None),
     ('./Project/Node/Properties/ProjectViewState.List', False, None),
-    ('./Media/ImporterPrefs', True, b64),
-    ('./Project/Node/Properties/*[@Encoding=\'base64\']', True, b64),
+    ('./Media/ImporterPrefs', True, 'b64'),
+    ('./Project/Node/Properties/*[@Encoding=\'base64\']', True, 'b64'),
 ]
 
 def bom_xml_escape(s):
@@ -27,33 +32,38 @@ def parse(path):
     s = bom_xml_escape(s)
     return ElementTree.ElementTree(ElementTree.fromstring(s))
 
-def get_item_full_id(stack, is_text):
+def get_item_full_xpath(stack):
     parts = []
     for item in stack[1:]:
         try:
-            id = get_item_id(item)
+            xpath = get_item_xpath(item)
         except NoIdException:
-            id = item.tag
+            xpath = item.tag
 
-        parts.append(id)
-    return os.path.join(*parts)
+        parts.append(xpath)
+    return "./" + ("/".join(parts))
+
+def xpath2filename(xpath):
+    path = xpath.translate(string.maketrans('@=', '--'), "[]''")
+    return os.path.join(*path.split('/'))
 
 class NoIdException(Exception):
     pass
 
-def get_item_id(item):
+def get_item_xpath(item):
     for n in ('ObjectID', 'ObjectRef', 'ObjectUID'):
         if n in item.attrib:
-            return item.tag + '-' + n + '-' + item.attrib[n]
+            return item.tag + '[@' + n + '=\'' + item.attrib[n] + "']"
     raise NoIdException()
 
-def write_element(output_path, item, is_text = False, decoding = None):
+def write_element(output_path, item, is_text = False, encoder = None):
     extension = 'xml'
     if is_text:
         content = item.text
-        if not decoding is None:
-            content = decoding[0](content)
-            extension = decoding[3]
+        if not encoder is None:
+            encoder = ENCODERS[encoder]
+            content = encoder[0](content)
+            extension = encoder[2]
     else:
         content = ElementTree.tostring(item, encoding = 'utf-8', method = 'xml')
 
@@ -82,17 +92,21 @@ def decompose(project_file):
         shutil.rmtree(output_directory)
     os.mkdir(output_directory)
 
+    decompositions = []
+
     items2remove = []
-    for xpath, is_text, decoding in EXTRACT:
+    for xpath, is_text, encoder in EXTRACT:
         for stack in get_stack(doc, xpath):
-            full_id = get_item_full_id(stack, is_text)
-            full_path = os.path.join(output_directory, full_id)
+            full_xpath = get_item_full_xpath(stack)
+            full_filename = xpath2filename(full_xpath)
+            full_path = os.path.join(output_directory, full_filename)
             if not os.path.exists(os.path.dirname(full_path)):
                 os.makedirs(os.path.dirname(full_path))
 
             parent, element = stack[-2:]
 
-            write_element(full_path, element, is_text, decoding)
+            write_element(full_path, element, is_text, encoder)
+            decompositions.append((full_xpath, is_text, encoder))
             if is_text:
                 element.text = None
             else:
@@ -104,14 +118,20 @@ def decompose(project_file):
     parent = doc.getroot()
     items2remove = []
     for item in doc.getroot():
-        output_path = os.path.join(output_directory, get_item_id(item))
+        xpath = get_item_xpath(item)
+        output_path = os.path.join(output_directory, xpath2filename(xpath))
         write_element(output_path, item)
+        decompositions.append((xpath, False, None))
         items2remove.append(item)
 
     for item in items2remove:
         parent.remove(item)
 
     write_element(os.path.join(output_directory, parent.tag), parent)
+
+    f = open(os.path.join(output_directory, 'decompositions.txt'), 'w')
+    f.writelines(map(lambda s: dumps(s) + "\n", decompositions))
+    f.close()
 
 def process_arguments(argv):
     op = argv[1]
