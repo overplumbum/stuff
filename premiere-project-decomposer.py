@@ -1,44 +1,46 @@
 import os, sys
 from xml.etree import ElementTree
+import shutil
 
-sections = [
-    ('Project', lambda x: x),
-]
+OUTERTAG = 'PremiereData'
 
 def parse(path):
     return ElementTree.parse(path)
 
-def extract_section(doc, section):
-    return doc.iter(section)
-
 def get_item_id(item):
-    for n in ('ObjectID', 'ObjectRef'):
+    for n in ('ObjectID', 'ObjectRef', 'ObjectUID'):
         if n in item.attrib:
             return n + '-' + item.attrib[n]
+    print 'unable to generate item id', item
+    sys.exit(2)
 
-def save_section(project_file, section_name, section_items):
-    output_directory = ".".join(os.path.basename(project_file).split(".")[:-1]) + '.unpacked'
-    output_directory = os.path.join(os.path.dirname(project_file), output_directory)
-    if not os.path.exists(output_directory):
-        os.mkdir(output_directory)
-
-    for item in section_items:
+def save_section(output_directory, item, has_id = True):
+    if has_id:
         item_id = get_item_id(item)
-        output_path = os.path.join(output_directory, section_name + '-' + item_id  + '.xml')
-        f = open(output_path, 'w')
-        f.write(ElementTree.tostring(item, encoding = 'utf-8', method = 'xml'))
-        f.close()
+        item_id = '-' + item_id
+    else:
+        item_id = ''
+    output_path = os.path.join(output_directory, item.tag + item_id  + '.xml')
+    f = open(output_path, 'w')
+    f.write(ElementTree.tostring(item, encoding = 'utf-8', method = 'xml'))
+    f.close()
 
 
 def decompose(project_file):
     doc = parse(project_file)
-    #todo: drop dest directory contents
-    for section_name, render in sections:
-        section_items = extract_section(doc, section_name)
-        section_items = render(section_items)
-        save_section(project_file, section_name, section_items)
-    # todo: save the rest + outer tag
 
+    output_directory = ".".join(os.path.basename(project_file).split(".")[:-1]) + '.unpacked'
+    output_directory = os.path.join(os.path.dirname(project_file), output_directory)
+    if os.path.exists(output_directory):
+        shutil.rmtree(output_directory)
+    os.mkdir(output_directory)
+
+    for item in doc.iterfind('./*'):
+        save_section(output_directory, item)
+
+    outer = ElementTree.Element(doc.getroot().tag)
+    outer.attrib.update(doc.getroot().attrib)
+    save_section(output_directory, outer, False)
 
 def process_arguments(argv):
     op = argv[1]
