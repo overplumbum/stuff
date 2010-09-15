@@ -2,17 +2,18 @@
 import os, sys
 from xml.etree import ElementTree
 import shutil
-from base64 import b64decode
 
-b64decode.extension = 'dat'
+from base64 import b64decode, b64encode
+b64 = (b64decode, b64encode, 'dat')
 
 EXTRACT = [
-    # xpath, is_text, decoder
+    # xpath, is_text, decoding: {(dec, enc, extension) | None}
     ('./Sequence/Node/Properties/Seq.Metadata', True, None),
     ('./Sequence/Node/Properties/MZ.Prefs.Export.LastExportedPreset', True, None),
     ('./WorkspaceSettings/WorkspaceDefinition', True, None),
     ('./Project/Node/Properties/ProjectViewState.List', False, None),
-    ('./Media/ImporterPrefs', True, b64decode),
+    ('./Media/ImporterPrefs', True, b64),
+    ('./Project/Node/Properties/*[@Encoding=\'base64\']', True, b64),
 ]
 
 def bom_xml_escape(s):
@@ -46,13 +47,13 @@ def get_item_id(item):
             return item.tag + '-' + n + '-' + item.attrib[n]
     raise NoIdException()
 
-def write_element(output_path, item, is_text = False, decoder = None):
+def write_element(output_path, item, is_text = False, decoding = None):
     extension = 'xml'
     if is_text:
         content = item.text
-        if not decoder is None:
-            content = decoder(content)
-            extension = decoder.extension
+        if not decoding is None:
+            content = decoding[0](content)
+            extension = decoding[3]
     else:
         content = ElementTree.tostring(item, encoding = 'utf-8', method = 'xml')
 
@@ -82,7 +83,7 @@ def decompose(project_file):
     os.mkdir(output_directory)
 
     items2remove = []
-    for xpath, is_text, decoder in EXTRACT:
+    for xpath, is_text, decoding in EXTRACT:
         for stack in get_stack(doc, xpath):
             full_id = get_item_full_id(stack, is_text)
             full_path = os.path.join(output_directory, full_id)
@@ -91,7 +92,7 @@ def decompose(project_file):
 
             parent, element = stack[-2:]
 
-            write_element(full_path, element, is_text, decoder)
+            write_element(full_path, element, is_text, decoding)
             if is_text:
                 element.text = None
             else:
