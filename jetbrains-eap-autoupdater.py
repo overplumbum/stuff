@@ -2,10 +2,23 @@
 from urllib2 import urlopen
 from re import search, IGNORECASE
 from glob import glob
-from os import path, rename, chdir, waitpid, mkdir
+from os import path, rename, chdir, waitpid, mkdir, environ
 from subprocess import Popen
 from shutil import rmtree
 from sys import exit
+
+PF86DIR=environ['ProgramFiles']
+PFDIR=PF86DIR[:-6]
+
+JBDIR=path.join(PF86DIR, 'JetBrains')
+DWDIR=path.join(JBDIR, '.downloads')
+
+if not path.exists(JBDIR):
+    mkdir(JBDIR)
+if not path.exists(DWDIR):
+    mkdir(DWDIR)
+
+chdir(JBDIR)
 
 for IDENAME, CHECKURL in (
     ('PhpStorm', 'http://confluence.jetbrains.net/display/WI/Web+IDE+EAP'),
@@ -13,7 +26,7 @@ for IDENAME, CHECKURL in (
 ):
     print 'checking for updates for', IDENAME
     dists = []
-    for d in glob(r'c:\Program Files\JetBrains\\'+IDENAME+'*'):
+    for d in glob(path.join(JBDIR, IDENAME+'*')):
         version_file = d + r'/version.txt'
         if not path.exists(version_file):
             continue
@@ -38,15 +51,15 @@ for IDENAME, CHECKURL in (
 
     if not already_installed(dists, last_url):
         version = outname = last_url.split('/')[-1]
-        chdir('.downloads')
+        chdir(DWDIR)
         try:
             if not path.exists(outname):
-                Popen(['wget', '-O', outname + '.tmp', '--continue', last_url]).communicate()
+                Popen([path.join(PF86DIR, 'GnuWin32', 'bin', 'wget'), '-O', outname + '.tmp', '--continue', last_url]).communicate()
                 rename(outname + '.tmp', outname)
             else:
                 print 'already downloaded'
         finally:
-            chdir('..')
+            chdir(JBDIR)
         
         newdir = IDENAME+'EAP'
         olddir = newdir + '.old'
@@ -56,14 +69,17 @@ for IDENAME, CHECKURL in (
         mkdir(newdir)
         chdir(newdir)
         
+        Popen([path.join(PFDIR, '7-Zip', '7z.exe'), 'x', path.join(DWDIR, outname)]).communicate()
+
         f = open('version.txt', 'w')
         f.write(version)
         f.close()
         
-        Popen([r'c:\Program Files\7-Zip\7z.exe', 'x', "../.downloads/"+outname]).communicate()
         chdir('..')
         rmtree(olddir, True)
-        #Popen([newdir + '/bin/'+IDENAME+'.exe'])
+        Popen([newdir + '/bin/'+IDENAME+'.exe'])
         print 'all done'
     else:
         print 'up-to-date'
+
+rmtree(DWDIR, True)
