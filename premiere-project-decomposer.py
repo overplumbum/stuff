@@ -13,12 +13,12 @@ ENCODERS = {
 
 EXTRACT = [
     # xpath, is_text, decoding: {(dec, enc, extension) | None}
-    ('./Sequence/Node/Properties/Seq.Metadata', True, None),
-    ('./Sequence/Node/Properties/MZ.Prefs.Export.LastExportedPreset', True, None),
-    ('./WorkspaceSettings/WorkspaceDefinition', True, None),
-    ('./Project/Node/Properties/ProjectViewState.List', False, None),
-    ('./Media/ImporterPrefs', True, 'b64'),
-    ('./Project/Node/Properties/*[@Encoding=\'base64\']', True, 'b64'),
+    ('Project/Node/Properties/ProjectViewState.List', False, None),
+    ('Project/Node/Properties/*[@Encoding=\'base64\']', True, 'b64'),
+    ('Sequence/Node/Properties/Seq.Metadata', True, None),
+    ('Sequence/Node/Properties/MZ.Prefs.Export.LastExportedPreset', True, None),
+    ('WorkspaceSettings/WorkspaceDefinition', True, None),
+    ('Media/ImporterPrefs', True, 'b64'),
 ]
 
 def bom_xml_escape(s):
@@ -41,7 +41,7 @@ def get_item_full_xpath(stack):
             xpath = item.tag
 
         parts.append(xpath)
-    return "./" + ("/".join(parts))
+    return ("/".join(parts))
 
 def xpath2filename(xpath):
     path = xpath.translate(string.maketrans('@=', '--'), "[]''")
@@ -72,22 +72,25 @@ def write_element(output_path, item, is_text = False, encoder = None):
     f.close()
 
 def get_stack(doc, xpath):
-    top = xpath.split('/')[-1]
-    rest = "/".join(xpath.split('/')[:-1])
-    if len(rest):
+    if not len(xpath):
+        yield (doc.getroot(),)
+    else:
+        top = xpath.split('/')[-1]
+        rest = "/".join(xpath.split('/')[:-1])
         for stack in get_stack(doc, rest):
             parent = stack[-1]
             for item in parent.findall('./' + top):
                 yield stack + (item,)
-    else:
-        yield (doc.getroot(),)
 
+
+def get_output_directory(project_file):
+    output_directory_name = ".".join(os.path.basename(project_file).split(".")[:-1]) + '.unpacked'
+    return os.path.join(os.path.dirname(project_file), output_directory_name)
 
 def decompose(project_file):
     doc = parse(project_file)
 
-    output_directory_name = ".".join(os.path.basename(project_file).split(".")[:-1]) + '.unpacked'
-    output_directory = os.path.join(os.path.dirname(project_file), output_directory_name)
+    output_directory = get_output_directory(project_file)
     if os.path.exists(output_directory):
         shutil.rmtree(output_directory)
     os.mkdir(output_directory)
@@ -133,14 +136,49 @@ def decompose(project_file):
     f.writelines(map(lambda s: dumps(s) + "\n", decompositions))
     f.close()
 
+def compose(project_file):
+    output_directory = get_output_directory(project_file)
+    f = open(os.path.join(output_directory, 'decompositions.txt'), 'r')
+    decompositions = map(tuple, map(loads, f.readlines()))
+    f.close()
+    decompositions.reverse()
+
+    doc = ElementTree.parse(os.path.join(output_directory, 'PremiereData.xml'))
+    for xpath, is_text, encoder in decompositions:
+        extension = 'xml'
+        if not encoder is None:
+            extension = ENCODERS[encoder][2]
+        path = os.path.join(output_directory, xpath2filename(xpath) + '.' + extension)
+
+        print xpath, is_text, encoder
+
+        if is_text:
+            node = doc.getroot().find(xpath)
+            f = open(path, 'rb')
+            content = f.read()
+            f.close()
+            if not encoder is None:
+                content = ENCODERS[encoder][1](content)
+            node.text = content
+        else:
+            xpath_parent = "/".join(("./" + xpath).split("/")[:-1])
+            parent = doc.getroot().find(xpath_parent)
+            element = ElementTree.parse(path).getroot()
+            parent.append(element)
+
+    if os.path.exists(project_file + '.bak'):
+        os.remove(project_file + '.bak')
+    os.rename(project_file, project_file + '.bak')
+    doc.write(project_file)
+
 def process_arguments(argv):
     op = argv[1]
     if op == 'd':
         for project_file in argv[2:]:
             decompose(project_file)
-    #elif op == 'c':
-    #    for project_file in argv[2:]:
-    #        compose(project_file)
+    elif op == 'c':
+        for project_file in argv[2:]:
+            compose(project_file)
     else:
         print "Usage:", os.path.basename(__file__), "{d|c} file1.pproj file2.pproj ..."
         sys.exit(1)
