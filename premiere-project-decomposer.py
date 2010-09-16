@@ -96,8 +96,16 @@ def decompose(project_file):
     os.mkdir(output_directory)
 
     decompositions = []
-
     items2remove = []
+
+    parent = doc.getroot()
+    for item in doc.getroot():
+        xpath = get_item_xpath(item)
+        output_path = os.path.join(output_directory, xpath2filename(xpath))
+        write_element(output_path, item)
+        decompositions.append((xpath, False, None))
+        items2remove.append((parent, item))
+
     for xpath, is_text, encoder in EXTRACT:
         for stack in get_stack(doc, xpath):
             full_xpath = get_item_full_xpath(stack)
@@ -106,30 +114,19 @@ def decompose(project_file):
             if not os.path.exists(os.path.dirname(full_path)):
                 os.makedirs(os.path.dirname(full_path))
 
-            parent, element = stack[-2:]
+            parent, item = stack[-2:]
 
-            write_element(full_path, element, is_text, encoder)
+            write_element(full_path, item, is_text, encoder)
             decompositions.append((full_xpath, is_text, encoder))
             if is_text:
-                element.text = None
+                item.text = None
             else:
-                items2remove.append((parent, element))
+                items2remove.append((parent, item))
 
     for parent, element in items2remove:
         parent.remove(element)
 
     parent = doc.getroot()
-    items2remove = []
-    for item in doc.getroot():
-        xpath = get_item_xpath(item)
-        output_path = os.path.join(output_directory, xpath2filename(xpath))
-        write_element(output_path, item)
-        decompositions.append((xpath, False, None))
-        items2remove.append(item)
-
-    for item in items2remove:
-        parent.remove(item)
-
     write_element(os.path.join(output_directory, parent.tag), parent)
 
     f = open(os.path.join(output_directory, 'decompositions.txt'), 'w')
@@ -141,7 +138,6 @@ def compose(project_file):
     f = open(os.path.join(output_directory, 'decompositions.txt'), 'r')
     decompositions = map(tuple, map(loads, f.readlines()))
     f.close()
-    decompositions.reverse()
 
     doc = ElementTree.parse(os.path.join(output_directory, 'PremiereData.xml'))
     for xpath, is_text, encoder in decompositions:
@@ -149,8 +145,6 @@ def compose(project_file):
         if not encoder is None:
             extension = ENCODERS[encoder][2]
         path = os.path.join(output_directory, xpath2filename(xpath) + '.' + extension)
-
-        print xpath, is_text, encoder
 
         if is_text:
             node = doc.getroot().find(xpath)
