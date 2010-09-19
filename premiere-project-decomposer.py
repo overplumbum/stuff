@@ -32,6 +32,21 @@ def parse(path):
     s = bom_xml_escape(s)
     return ElementTree.ElementTree(ElementTree.fromstring(s))
 
+def normalize_ids(tree):
+    id_attributes = ('ObjectID', 'ObjectRef')
+
+    ids = set()
+    for attribute in id_attributes:
+        elements = tree.findall('.//*[@'+attribute+']')
+        ids.update(set([int(e.attrib[attribute]) for e in elements]))
+    ids = list(ids)
+    ids.sort()
+    base = 1000
+    map = dict(zip(ids, range(base, base+len(ids))))
+    for attribute in id_attributes:
+        for e in tree.findall('.//*[@'+attribute+']'):
+            e.attrib[attribute] = str(map[int(e.attrib[attribute])])
+
 def get_item_full_xpath(stack):
     parts = []
     for item in stack[1:]:
@@ -51,7 +66,7 @@ class NoIdException(Exception):
     pass
 
 def get_item_xpath(item):
-    for n in ('ObjectID', 'ObjectRef', 'ObjectUID'):
+    for n in ('ObjectUID', 'ObjectID', 'ObjectRef', ):
         if n in item.attrib:
             return item.tag + '[@' + n + '=\'' + item.attrib[n] + "']"
     raise NoIdException()
@@ -89,6 +104,7 @@ def get_output_directory(project_file):
 
 def decompose(project_file):
     doc = parse(project_file)
+    #normalize_ids(doc)
 
     output_directory = get_output_directory(project_file)
     if os.path.exists(output_directory):
@@ -129,7 +145,7 @@ def decompose(project_file):
     parent = doc.getroot()
     write_element(os.path.join(output_directory, parent.tag), parent)
 
-    f = open(os.path.join(output_directory, 'decompositions.txt'), 'w')
+    f = open(os.path.join(output_directory, 'decompositions.txt'), 'wb')
     f.writelines(map(lambda s: dumps(s) + "\n", decompositions))
     f.close()
 
