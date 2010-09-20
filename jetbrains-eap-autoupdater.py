@@ -8,7 +8,10 @@ from shutil import rmtree
 from sys import exit
 
 PF86DIR=environ['ProgramFiles']
-PFDIR=PF86DIR[:-6]
+if '86' in PF86DIR:
+    PFDIR=PF86DIR[:-6]
+else:
+    PFDIR=PF86DIR
 
 JBDIR=path.join(PF86DIR, 'JetBrains')
 DWDIR=path.join(JBDIR, '.downloads')
