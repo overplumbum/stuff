@@ -88,67 +88,67 @@ outdoc = ElementTree.ElementTree(ElementTree.Element('kml'))
 outdoc_document = ElementTree.Element('Document')
 outdoc.getroot().append(outdoc_document)
 
-current_ele = current_lat = current_lon = current = None
+prev = current_ele = current_lat = current_lon = current = None
 checkpoints = iter(splits)
 checkpoint = next(checkpoints)
 prev_cp = prev_cp_data = None
 
 all_found = False
-for e in doc.findall('.//{http://www.topografix.com/GPX/1/1}trkpt'):
-    prev = current
-    prev_lat = current_lat
-    prev_lon = current_lon
-    prev_ele = current_ele
-
-    current_lat, current_lon = float(e.attrib['lat']), float(e.attrib['lon'])
-    current_ele = float(e.findtext('{http://www.topografix.com/GPX/1/1}ele'))
-    current = e.findtext('{http://www.topografix.com/GPX/1/1}time')
-    current = datetime.datetime.strptime(current, '%Y-%m-%dT%H:%M:%SZ')
-    current = utc.localize(current)
-    if prev is None:
+try:
+    for e in doc.findall('.//{http://www.topografix.com/GPX/1/1}trkpt'):
         prev = current
-        continue
-    if prev == current:
-        continue
+        prev_lat = current_lat
+        prev_lon = current_lon
+        prev_ele = current_ele
 
-    if prev <= checkpoint[1] and checkpoint[1] < current:
-        position = (checkpoint[1] - prev).total_seconds() / (current - prev).total_seconds()
+        current_lat, current_lon = float(e.attrib['lat']), float(e.attrib['lon'])
+        current_ele = float(e.findtext('{http://www.topografix.com/GPX/1/1}ele'))
+        current = e.findtext('{http://www.topografix.com/GPX/1/1}time')
+        current = datetime.datetime.strptime(current, '%Y-%m-%dT%H:%M:%SZ')
+        current = utc.localize(current)
+        if prev is None:
+            prev = current
+            continue
 
-        if not prev_cp is None:
-            dist = distance((prev_cp_data[:2]), (current_lon, current_lat))
-            time = checkpoint[1] - prev_cp[1]
-            comments = [
-                #str(checkpoint[1][1]) + u" место",
-                u"Время: " + str(time),
-                u"Путь (прямо): " + str(int(round(dist))) + u"м",
-                u"Темп (прямо): " + str(round(1000.0*time.total_seconds()/60.0/dist, 1)) + u" мин/км.",
-            ]
-        else:
-            comments = []
+        while prev <= checkpoint[1] and checkpoint[1] < current:
+            position = (checkpoint[1] - prev).total_seconds() / (current - prev).total_seconds()
 
-        wpt = ElementTree.Element('Placemark')
-        point = ElementTree.Element('Point')
-        point.append(text_node('coordinates', ",".join((
-            str((1.0 - position) * prev_lon + position * current_lon),
-            str((1.0 - position) * prev_lat + position * current_lat),
-            str((1.0 - position) * prev_ele + position * current_ele),
-        ))))
-        wpt.append(point)
+            if not prev_cp is None:
+                dist = distance((prev_cp_data[:2]), (current_lon, current_lat))
+                time = checkpoint[1] - prev_cp[1]
+                comments = [
+                    #str(checkpoint[1][1]) + u" место",
+                    u"Время: " + str(time),
+                    u"Путь (прямо): " + str(int(round(dist))) + u"м",
+                    u"Темп (прямо): " + str(round(1000.0*time.total_seconds()/60.0/dist, 1)) + u" мин/км." if dist else '--',
+                ]
+            else:
+                comments = []
 
-        wpt.append(text_node('name', text = checkpoint[0]))
-        wpt.append(text_node('description', text = "\n".join(comments)))
+            wpt = ElementTree.Element('Placemark')
+            point = ElementTree.Element('Point')
+            point.append(text_node('coordinates', ",".join((
+                str((1.0 - position) * prev_lon + position * current_lon),
+                str((1.0 - position) * prev_lat + position * current_lat),
+                str((1.0 - position) * prev_ele + position * current_ele),
+            ))))
+            wpt.append(point)
 
-        #wpt.append(text_node('time', text = checkpoint[1][0].isoformat()))
-        outdoc_document.append(wpt)
+            name = checkpoint[0]
+            print name, 'found'
+            wpt.append(text_node('name', text = name))
+            wpt.append(text_node('description', text = "\n".join(comments)))
 
-        try:
+            #wpt.append(text_node('time', text = checkpoint[1][0].isoformat()))
+            outdoc_document.append(wpt)
+
             prev_cp_data = (current_lon, current_lat, current_ele)
             prev_cp = checkpoint
             checkpoint = next(checkpoints)
-        except StopIteration:
-            print "All waypoints found"
-            all_found = True
-            break
+            print "Looking for", checkpoint
+except StopIteration:
+    print "All waypoints found"
+    all_found = True
 
 if not all_found:
     raise Exception("not all points found :( aborting")
