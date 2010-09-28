@@ -1,8 +1,14 @@
 # coding: utf-8
+
+# @todos:
+# looks like NextComponentID refer
+#
+
 import os, sys
 from xml.etree import ElementTree
 import shutil
 from json import dumps, loads
+from hashlib import md5
 
 from base64 import b64decode, b64encode
 import string
@@ -13,10 +19,10 @@ ENCODERS = {
 
 EXTRACT = [
     # xpath, is_text, decoding: {(dec, enc, extension) | None}
+    ('Sequence/Node/Properties/MZ.Prefs.Export.LastExportedPreset', True, None),
     ('Project/Node/Properties/ProjectViewState.List', False, None),
     ('Project/Node/Properties/*[@Encoding=\'base64\']', True, 'b64'),
     ('Sequence/Node/Properties/Seq.Metadata', True, None),
-    ('Sequence/Node/Properties/MZ.Prefs.Export.LastExportedPreset', True, None),
     ('WorkspaceSettings/WorkspaceDefinition', True, None),
     ('Media/ImporterPrefs', True, 'b64'),
 ]
@@ -30,32 +36,44 @@ def parse(path):
     f.close()
 
     s = bom_xml_escape(s)
-    return ElementTree.ElementTree(ElementTree.fromstring(s))
+    doc = ElementTree.ElementTree(ElementTree.fromstring(s))
+    doc.parent_map = dict((c, p) for p in doc.getiterator() for c in p)
+    return doc
+
+def get_tags_path(tree, e):
+    parts = [e.tag]
+    pm = tree.parent_map
+    while e in pm:
+        e = pm[e]
+        parts.insert(0, e.tag)
+    return "/".join(parts)
 
 def normalize_ids(tree):
     id_attributes = ('ObjectID', 'ObjectRef')
 
-    ids = set()
+    map = {}
     for attribute in id_attributes:
         elements = tree.findall('.//*[@'+attribute+']')
-        ids.update(set([int(e.attrib[attribute]) for e in elements]))
-    ids = list(ids)
-    ids.sort()
-    base = 1000
-    map = dict(zip(ids, range(base, base+len(ids))))
-    for attribute in id_attributes:
-        for e in tree.findall('.//*[@'+attribute+']'):
-            e.attrib[attribute] = str(map[int(e.attrib[attribute])])
+        for e in elements:
+            path = get_tags_path(tree, e)
+            if not path in map:
+                map[path] = [1, {}]
 
-def get_item_full_xpath(stack):
-    parts = []
-    for item in stack[1:]:
-        try:
-            xpath = get_item_xpath(item)
-        except NoIdException:
-            xpath = item.tag
+            v = e.attrib[attribute]
+            if not v in map[path][1]:
+                map[path][1][v] = map[path][0]
+                map[path][0] += 1
+            m = md5()
+            m.update(path)
+            e.attrib[attribute] = m.hexdigest()[:6] + '-' + str(map[path][1][v])
 
-        parts.append(xpath)
+def get_item_full_xpath(doc, item):
+    pm = doc.parent_map
+    parts = [get_item_xpath(item, True)]
+    while item in pm:
+        item = pm[item]
+        xpath = get_item_xpath(item, True)
+        parts.insert(0, xpath)
     return ("/".join(parts))
 
 def xpath2filename(xpath):
@@ -65,10 +83,12 @@ def xpath2filename(xpath):
 class NoIdException(Exception):
     pass
 
-def get_item_xpath(item):
+def get_item_xpath(item, allow_empty_id = False):
     for n in ('ObjectUID', 'ObjectID', 'ObjectRef', ):
         if n in item.attrib:
             return item.tag + '[@' + n + '=\'' + item.attrib[n] + "']"
+    if allow_empty_id:
+        return item.tag
     raise NoIdException()
 
 def write_element(output_path, item, is_text = False, encoder = None):
@@ -86,25 +106,13 @@ def write_element(output_path, item, is_text = False, encoder = None):
     f.write(content)
     f.close()
 
-def get_stack(doc, xpath):
-    if not len(xpath):
-        yield (doc.getroot(),)
-    else:
-        top = xpath.split('/')[-1]
-        rest = "/".join(xpath.split('/')[:-1])
-        for stack in get_stack(doc, rest):
-            parent = stack[-1]
-            for item in parent.findall('./' + top):
-                yield stack + (item,)
-
-
 def get_output_directory(project_file):
     output_directory_name = ".".join(os.path.basename(project_file).split(".")[:-1]) + '.unpacked'
     return os.path.join(os.path.dirname(project_file), output_directory_name)
 
 def decompose(project_file):
     doc = parse(project_file)
-    #normalize_ids(doc)
+    normalize_ids(doc)
 
     output_directory = get_output_directory(project_file)
     if os.path.exists(output_directory):
@@ -112,32 +120,40 @@ def decompose(project_file):
     os.mkdir(output_directory)
 
     decompositions = []
+
     items2remove = []
-
-    parent = doc.getroot()
-    for item in doc.getroot():
-        xpath = get_item_xpath(item)
-        output_path = os.path.join(output_directory, xpath2filename(xpath))
-        write_element(output_path, item)
-        decompositions.append((xpath, False, None))
-        items2remove.append((parent, item))
-
     for xpath, is_text, encoder in EXTRACT:
-        for stack in get_stack(doc, xpath):
-            full_xpath = get_item_full_xpath(stack)
+        for item in doc.findall(xpath):
+            full_xpath = get_item_full_xpath(doc, item)
             full_filename = xpath2filename(full_xpath)
             full_path = os.path.join(output_directory, full_filename)
             if not os.path.exists(os.path.dirname(full_path)):
                 os.makedirs(os.path.dirname(full_path))
 
-            parent, item = stack[-2:]
+            parent = doc.parent_map[item]
 
             write_element(full_path, item, is_text, encoder)
             decompositions.append((full_xpath, is_text, encoder))
             if is_text:
-                item.text = None
+                item.text = ''
+                item.attrib.pop('Checksum', False)
             else:
                 items2remove.append((parent, item))
+
+    for parent, element in items2remove:
+        parent.remove(element)
+
+    items2remove = []
+    parent = doc.getroot()
+    for item in doc.getroot():
+        xpath = get_item_full_xpath(doc, item)
+        full_path = os.path.join(output_directory, xpath2filename(xpath))
+        if not os.path.exists(os.path.dirname(full_path)):
+            os.makedirs(os.path.dirname(full_path))
+
+        write_element(full_path, item)
+        decompositions.append((xpath, False, None))
+        items2remove.append((parent, item))
 
     for parent, element in items2remove:
         parent.remove(element)
