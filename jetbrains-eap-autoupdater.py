@@ -23,9 +23,9 @@ if not path.exists(DWDIR):
 
 chdir(JBDIR)
 
-for IDENAME, CHECKURL in (
-    ('PhpStorm', 'http://confluence.jetbrains.net/display/WI/Web+IDE+EAP'),
-    ('PyCharm', 'http://confluence.jetbrains.net/display/PYH/JetBrains+PyCharm+Preview'),
+for IDENAME, CHECKURLS in (
+    ('PhpStorm', ['http://confluence.jetbrains.net/display/WI/Web+IDE+EAP']),
+    ('PyCharm', ['http://confluence.jetbrains.net/display/PYH/JetBrains+PyCharm+Preview', 'http://www.jetbrains.com/pycharm/download/']),
 ):
     print 'checking for updates for', IDENAME
     dists = []
@@ -41,10 +41,14 @@ for IDENAME, CHECKURL in (
     dists = dict(dists)
     print 'installed', IDENAME+'s', dists.keys()
 
-    f = urlopen(CHECKURL)
-    last_url = search('href="([^"]+'+IDENAME+'[^"]+[.]exe)"', f.read(), flags=IGNORECASE).group(1)
-    print 'last '+IDENAME+':', last_url
-    f.close()
+    for CHECKURL in CHECKURLS:
+        f = urlopen(CHECKURL)
+	m = search('href="([^"]+'+IDENAME+'[^"]+[.]exe)"', f.read(), flags=IGNORECASE)
+	if not m is None:
+            last_url = m.group(1)
+            print 'last '+IDENAME+':', last_url
+            f.close()
+            break
 
     def already_installed(dists, last_url):
         for build in dists.keys():
