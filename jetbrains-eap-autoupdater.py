@@ -84,7 +84,8 @@ for IDENAME, CHECKURLS in (
         
         chdir('..')
         rmtree(olddir, True)
-        Popen([newdir + '/bin/'+IDENAME+'.exe'])
+        # @TODO: запускать только если уже была запущена
+        # Popen([newdir + '/bin/'+IDENAME+'.exe'])
         print 'all done'
     else:
         print 'up-to-date'
