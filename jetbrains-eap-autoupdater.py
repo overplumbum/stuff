@@ -26,6 +26,7 @@ chdir(JBDIR)
 for IDENAME, CHECKURLS in (
     ('PhpStorm', ['http://confluence.jetbrains.net/display/WI/Web+IDE+EAP']),
     ('PyCharm', ['http://confluence.jetbrains.net/display/PYH/JetBrains+PyCharm+Preview', 'http://www.jetbrains.com/pycharm/download/']),
+    ('ideaIC', ['http://confluence.jetbrains.net/display/IDEADEV/IDEA+X+EAP']),
 ):
     print 'checking for updates for', IDENAME
     dists = []
